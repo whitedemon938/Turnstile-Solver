@@ -107,7 +107,7 @@ class AsyncTurnstileSolver:
         start_time = time.time()
 
         async with async_playwright() as playwright:
-            browser = await playwright.chromium.launch(args=self.browser_args)
+            browser = await playwright.chromium.launch(headless=False, args=self.browser_args)
             context = await browser.new_context()
 
             try:

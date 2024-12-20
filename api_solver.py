@@ -123,6 +123,7 @@ class TurnstileAPIServer:
 
         playwright = await async_playwright().start()
         self.browser = await playwright.chromium.launch(
+            headless=False,
             args=self.browser_args
         )
         self.context = await self.browser.new_context()

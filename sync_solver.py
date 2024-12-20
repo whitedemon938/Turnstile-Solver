@@ -90,14 +90,13 @@ class TurnstileSolver:
 
         return None
 
-    def solve(self, url: str, sitekey: str, headless: bool = False, invisible: bool = False) -> TurnstileResult:
+    def solve(self, url: str, sitekey: str, invisible: bool = False) -> TurnstileResult:
         """
         Solve the Turnstile challenge and return the result.
         
         Args:
             url: The URL where the Turnstile challenge is hosted
             sitekey: The Turnstile sitekey
-            headless: Whether to run the browser in headless mode
             invisible: Whether the Turnstile challenge is invisible
 
         Returns:
@@ -107,7 +106,7 @@ class TurnstileSolver:
         start_time = time.time()
 
         with sync_playwright() as playwright:
-            browser = playwright.chromium.launch(headless=headless, args=self.browser_args)
+            browser = playwright.chromium.launch(headless=False, args=self.browser_args)
             context = browser.new_context()
 
             try:
@@ -148,10 +147,10 @@ class TurnstileSolver:
 
         return result
 
-def get_turnstile_token(headless: bool = False, url: str = None, sitekey: str = None, invisible: bool = False) -> Dict:
+def get_turnstile_token( url: str = None, sitekey: str = None, invisible: bool = False) -> Dict:
     """Legacy wrapper function for backward compatibility."""
     solver = TurnstileSolver()
-    result = solver.solve(url=url, sitekey=sitekey, headless=headless, invisible=invisible)
+    result = solver.solve(url=url, sitekey=sitekey, invisible=invisible)
     return result.__dict__
 
 if __name__ == "__main__":

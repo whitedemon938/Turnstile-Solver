@@ -50,22 +50,22 @@ class TurnstileSolver:
         """Set up the page with Turnstile widget."""
         page = context.new_page()
         url_with_slash = url + "/" if not url.endswith("/") else url
-        
+
         if self.debug:
             self.log.debug(f"Navigating to URL: {url_with_slash}")
 
-        turnstile_div = f'<div class="cf-turnstile" data-sitekey="{sitekey}"></div>'
+        turnstile_div = f'<div class="cf-turnstile" data-sitekey="{sitekey}" data-theme="light"></div>'
         page_data = self.HTML_TEMPLATE.replace("<!-- cf turnstile -->", turnstile_div)
-        
+
         page.route(url_with_slash, lambda route: route.fulfill(body=page_data, status=200))
         page.goto(url_with_slash)
-        
+
         return page
 
-    def _get_turnstile_response(self, page: Page, max_attempts: int = 10) -> Optional[str]:
+    def _get_turnstile_response(self, page: Page, max_attempts: int = 10, invisible: bool = False) -> Optional[str]:
         """Attempt to retrieve Turnstile response."""
         attempts = 0
-        
+
         while attempts < max_attempts:
             turnstile_check = page.eval_on_selector(
                 "[name=cf-turnstile-response]", 
@@ -75,9 +75,11 @@ class TurnstileSolver:
             if turnstile_check == "":
                 if self.debug:
                     self.log.debug(f"Attempt {attempts + 1}: No Turnstile response yet.")
-                
-                page.evaluate("document.querySelector('.cf-turnstile').style.width = '70px'")
-                page.click(".cf-turnstile")
+
+                if not invisible:
+                    page.evaluate("document.querySelector('.cf-turnstile').style.width = '70px'")
+                    page.click(".cf-turnstile")
+
                 time.sleep(0.5)
                 attempts += 1
             else:
@@ -85,10 +87,10 @@ class TurnstileSolver:
                 if turnstile_element:
                     return turnstile_element.get_attribute("value")
                 break
-        
+
         return None
 
-    def solve(self, url: str, sitekey: str, headless: bool = False) -> TurnstileResult:
+    def solve(self, url: str, sitekey: str, headless: bool = False, invisible: bool = False) -> TurnstileResult:
         """
         Solve the Turnstile challenge and return the result.
         
@@ -96,7 +98,8 @@ class TurnstileSolver:
             url: The URL where the Turnstile challenge is hosted
             sitekey: The Turnstile sitekey
             headless: Whether to run the browser in headless mode
-            
+            invisible: Whether the Turnstile challenge is invisible
+
         Returns:
             TurnstileResult object containing the solution details
         """
@@ -109,10 +112,10 @@ class TurnstileSolver:
 
             try:
                 page = self._setup_page(context, url, sitekey)
-                turnstile_value = self._get_turnstile_response(page)
-                
+                turnstile_value = self._get_turnstile_response(page, invisible=invisible)
+
                 elapsed_time = round(time.time() - start_time, 3)
-                
+
                 if not turnstile_value:
                     result = TurnstileResult(
                         turnstile_value=None,
@@ -127,6 +130,7 @@ class TurnstileSolver:
                         elapsed_time_seconds=elapsed_time,
                         status="success"
                     )
+                    self.loader.stop()
                     self.log.message(
                         "Cloudflare",
                         f"Successfully solved captcha: {turnstile_value[:45]}...",
@@ -137,7 +141,6 @@ class TurnstileSolver:
             finally:
                 context.close()
                 browser.close()
-                self.loader.stop()
 
                 if self.debug:
                     self.log.debug(f"Elapsed time: {result.elapsed_time_seconds} seconds")
@@ -145,19 +148,18 @@ class TurnstileSolver:
 
         return result
 
-def get_turnstile_token(headless: bool = False, url: str = None, sitekey: str = None) -> Dict:
+def get_turnstile_token(headless: bool = False, url: str = None, sitekey: str = None, invisible: bool = False) -> Dict:
     """Legacy wrapper function for backward compatibility."""
     solver = TurnstileSolver()
-    result = solver.solve(url=url, sitekey=sitekey, headless=headless)
+    result = solver.solve(url=url, sitekey=sitekey, headless=headless, invisible=invisible)
     return result.__dict__
 
 if __name__ == "__main__":
     result = get_turnstile_token(
-        headless=False,
-        url="https://bypass.city/",
-        sitekey="0x4AAAAAAAGzw6rXeQWJ_y2P"
+        url="https://streamlabs.com",
+        sitekey="0x4AAAAAAACELUBpqiwktdQ9",
+        invisible=True
     )
-    print(result)
 
 # Credits for the changes: github.com/sexfrance
 # Credit for the original script: github.com/Theyka

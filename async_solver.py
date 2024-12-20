@@ -51,30 +51,22 @@ class AsyncTurnstileSolver:
         """Set up the page with Turnstile widget."""
         page = await context.new_page()
         url_with_slash = url + "/" if not url.endswith("/") else url
-        
+
         if self.debug:
             self.log.debug(f"Navigating to URL: {url_with_slash}")
 
-        turnstile_div = f'<div class="cf-turnstile" data-sitekey="{sitekey}"></div>'
+        turnstile_div = f'<div class="cf-turnstile" data-sitekey="{sitekey}" data-theme="light"></div>'
         page_data = self.HTML_TEMPLATE.replace("<!-- cf turnstile -->", turnstile_div)
-        
+
         await page.route(url_with_slash, lambda route: route.fulfill(body=page_data, status=200))
         await page.goto(url_with_slash)
 
-        if self.debug:
-            self.log.debug("Getting window dimensions.")
-        page.window_width = await page.evaluate("window.innerWidth")
-        page.window_height = await page.evaluate("window.innerHeight")
-        
         return page
 
-    async def _get_turnstile_response(self, page: Page, max_attempts: int = 10) -> Optional[str]:
+    async def _get_turnstile_response(self, page: Page, max_attempts: int = 10, invisible: bool = False) -> Optional[str]:
         """Attempt to retrieve Turnstile response."""
         attempts = 0
-        
-        if self.debug:
-            self.log.debug("Starting Turnstile response retrieval loop.")
-        
+
         while attempts < max_attempts:
             turnstile_check = await page.eval_on_selector(
                 "[name=cf-turnstile-response]", 
@@ -84,31 +76,30 @@ class AsyncTurnstileSolver:
             if turnstile_check == "":
                 if self.debug:
                     self.log.debug(f"Attempt {attempts + 1}: No Turnstile response yet.")
-                
-                await page.evaluate("document.querySelector('.cf-turnstile').style.width = '70px'")
-                await page.click(".cf-turnstile")
+
+                if not invisible:
+                    await page.evaluate("document.querySelector('.cf-turnstile').style.width = '70px'")
+                    await page.click(".cf-turnstile")
+
                 await asyncio.sleep(0.5)
                 attempts += 1
             else:
                 turnstile_element = await page.query_selector("[name=cf-turnstile-response]")
                 if turnstile_element:
-                    value = await turnstile_element.get_attribute("value")
-                    if self.debug:
-                        self.log.debug(f"Turnstile response received: {value}")
-                    return value
+                    return await turnstile_element.get_attribute("value")
                 break
-        
+
         return None
 
-    async def solve(self, url: str, sitekey: str, headless: bool = False) -> TurnstileResult:
+    async def solve(self, url: str, sitekey: str, invisible: bool = False) -> TurnstileResult:
         """
         Solve the Turnstile challenge and return the result.
         
         Args:
             url: The URL where the Turnstile challenge is hosted
             sitekey: The Turnstile sitekey
-            headless: Whether to run the browser in headless mode
-            
+            invisible: Whether the Turnstile challenge is invisible
+
         Returns:
             TurnstileResult object containing the solution details
         """
@@ -116,15 +107,15 @@ class AsyncTurnstileSolver:
         start_time = time.time()
 
         async with async_playwright() as playwright:
-            browser = await playwright.chromium.launch(headless=headless, args=self.browser_args)
+            browser = await playwright.chromium.launch(args=self.browser_args)
             context = await browser.new_context()
 
             try:
                 page = await self._setup_page(context, url, sitekey)
-                turnstile_value = await self._get_turnstile_response(page)
-                
+                turnstile_value = await self._get_turnstile_response(page, invisible=invisible)
+
                 elapsed_time = round(time.time() - start_time, 3)
-                
+
                 if not turnstile_value:
                     result = TurnstileResult(
                         turnstile_value=None,
@@ -139,6 +130,7 @@ class AsyncTurnstileSolver:
                         elapsed_time_seconds=elapsed_time,
                         status="success"
                     )
+                    self.loader.stop()
                     self.log.message(
                         "Cloudflare",
                         f"Successfully solved captcha: {turnstile_value[:45]}...",
@@ -149,7 +141,6 @@ class AsyncTurnstileSolver:
             finally:
                 await context.close()
                 await browser.close()
-                self.loader.stop()
 
                 if self.debug:
                     self.log.debug(f"Elapsed time: {result.elapsed_time_seconds} seconds")
@@ -157,18 +148,18 @@ class AsyncTurnstileSolver:
 
         return result
 
-async def get_turnstile_token(headless: bool = False, url: str = None, sitekey: str = None) -> Dict:
+async def get_turnstile_token(url: str = None, sitekey: str = None, invisible: bool = False) -> Dict:
     """Legacy wrapper function for backward compatibility."""
     solver = AsyncTurnstileSolver()
-    result = await solver.solve(url=url, sitekey=sitekey, headless=headless)
+    result = await solver.solve(url=url, sitekey=sitekey, invisible=invisible)
     return result.__dict__
 
 if __name__ == "__main__":
     async def main():
         result = await get_turnstile_token(
-            headless=False,
-            url="https://bypass.city/",
-            sitekey="0x4AAAAAAAGzw6rXeQWJ_y2P"
+            url="https://streamlabs.com",
+            sitekey="0x4AAAAAAACELUBpqiwktdQ9",
+            invisible=True
         )
         print(result)
 

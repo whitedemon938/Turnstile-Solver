@@ -30,6 +30,7 @@ A Python-based solution for solving Cloudflare Turnstile challenges quickly (4-6
 
 - **Debug Logging**: Detailed debug logs track actions and progress, making troubleshooting straightforward.
 - **Automated CAPTCHA Solver**: Uses Playwright to launch a browser, navigate to the target page, and dynamically injects a CAPTCHA solver.
+- **Works on all type of Cloudflare Turnstile**: Works both on invisible and visible cloudflare turnstile challenges.
 - **Customizable Browser Context**: Sets browser options like headless mode, sandboxing, and disabling unnecessary features to optimize performance.
 - **Responsive CAPTCHA Interaction**: Adjusts CAPTCHA display, clicks on it, and retrieves the response through repeated attempts if necessary.
 - **Timeout and Retries**: Implements a retry loop with configurable timeouts, ensuring robust attempts to retrieve the CAPTCHA token.
@@ -69,6 +70,12 @@ v0.0.3 ⋮ 11/7/2024
 + Added web interface for API documentation
 + Improved error handling and logging
 + Added concurrent processing support
+
+v0.0.4 ⋮ 11/7/2024
++ Minor bug fixes
++ Added invisible cloudflare support
++ Removed headless option as it is not useful since the browser is only working without
+
 ```
 
 ---

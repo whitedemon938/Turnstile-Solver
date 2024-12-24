@@ -2,7 +2,7 @@
  
   <h2 align="center">Cloudflare - Turnstile Solver</h2>
   <p align="center">
-A Python-based solution for solving Cloudflare Turnstile challenges quickly (4-6 seconds solve time). The script uses patchright library to interact with web pages and solve the challenges without running additional browser instances.
+A Python-based solution for solving Cloudflare Turnstile challenges quickly (4-6 seconds solve time). The script uses patchright library to interact with web pages and solve the challenges with optimized browser management.
     <br />
     <br />
     <a href="https://discord.cyberious.xyz">💬 Discord</a>
@@ -22,20 +22,26 @@ A Python-based solution for solving Cloudflare Turnstile challenges quickly (4-6
 - Source the environment: `venv\Scripts\activate` (Windows) / `source venv/bin/activate` (macOS, Linux)
 - Install the requirements: `pip install -r requirements.txt`
 - Install chrominium: `patchright install chromium` / `python -m patchright install chromium`
-- Start: `Remove comments for testing in async and sync python files then run those`
+- Start: `python main.py` to access all solvers through an interactive interface
 
 ---
 
 ### 🔥 Features
 
-- **Debug Logging**: Detailed debug logs track actions and progress, making troubleshooting straightforward.
-- **Automated CAPTCHA Solver**: Uses Playwright to launch a browser, navigate to the target page, and dynamically injects a CAPTCHA solver.
-- **Works on all type of Cloudflare Turnstile**: Works both on invisible and visible cloudflare turnstile challenges.
-- **Customizable Browser Context**: Sets browser options like headless mode, sandboxing, and disabling unnecessary features to optimize performance.
-- **Responsive CAPTCHA Interaction**: Adjusts CAPTCHA display, clicks on it, and retrieves the response through repeated attempts if necessary.
-- **Timeout and Retries**: Implements a retry loop with configurable timeouts, ensuring robust attempts to retrieve the CAPTCHA token.
-- **Elapsed Time Tracking**: Logs and returns elapsed time for solving CAPTCHA, providing an efficiency metric.
-- **Error Handling**: Returns detailed status messages on success or failure, allowing for straightforward integration and feedback.
+- **Multi-Browser Pool System**: Manages a pool of up to 10 browsers for concurrent solving
+- **Page Pooling**: Efficient page reuse and management within each browser instance
+- **Three Solving Modes**:
+  - Synchronous solver for simple use cases
+  - Asynchronous solver for better performance
+  - API server for web-based integrations
+- **Resource Optimization**: Smart browser and page lifecycle management
+- **Debug Logging**: Detailed debug logs for troubleshooting
+- **Cookie Support**: Ability to set custom cookies for authentication
+- **Automatic Cleanup**: Proper resource management and cleanup
+- **Interactive Interface**: Easy-to-use command-line interface to access all solvers
+- **API Documentation**: Built-in web interface with API usage documentation
+- **Invisible & Visible Support**: Works with both invisible and visible Turnstile challenges
+- **Error Handling**: Comprehensive error handling and reporting
 
 ---
 
@@ -71,11 +77,19 @@ v0.0.3 ⋮ 11/7/2024
 + Improved error handling and logging
 + Added concurrent processing support
 
-v0.0.4 ⋮ 11/7/2024
+v0.0.4 ⋮ 12/7/2024
 + Minor bug fixes
 + Added invisible cloudflare support
-+ Removed headless option as it is not useful since the browser is only working without
++ Removed headless option as it is not useful
++ Added cookie support for authentication
 
+v0.0.5 ⋮ 12/24/2024
++ Implemented browser pooling system (10 concurrent browsers)
++ Added page pooling for each browser
++ Improved resource management
++ Added interactive CLI interface
++ Enhanced error handling and debugging
++ Optimized browser lifecycle management
 ```
 
 ---

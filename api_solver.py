@@ -290,6 +290,38 @@ class TurnstileAPIServer:
 
     async def process_turnstile(self):
         """Handle the /turnstile endpoint requests."""
+        try:
+            url = request.args.get('url')
+            sitekey = request.args.get('sitekey')
+            invisible = request.args.get('invisible', 'false').lower() == 'true'
+            
+            if not url or not sitekey:
+                return jsonify({
+                    'status': 'error',
+                    'error': 'Missing required parameters: url and sitekey'
+                }), 400
+
+            result = await self._solve_turnstile(
+                url=url,
+                sitekey=sitekey,
+                invisible=invisible,
+                headless=True
+            )
+            
+            return jsonify({
+                'status': result.status,
+                'result': result.result,
+                'elapsed_time_seconds': result.elapsed_time_seconds,
+                'error': result.error
+            })
+
+        except Exception as e:
+            self.log.failure(f"Error processing turnstile request: {str(e)}")
+            return jsonify({
+                'status': 'error',
+                'error': str(e)
+            }), 500
+
     async def index(self):
         """Serve the API documentation page."""
         return """

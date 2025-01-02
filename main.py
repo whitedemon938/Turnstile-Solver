@@ -92,7 +92,7 @@ class TurnstileTester:
 
                 if mode == 'sync':
                     result = self.run_sync_solver(url, sitekey)
-                else:  # async
+                else:
                     result = await self.run_async_solver(url, sitekey)
 
                 self.log.debug("Result details:")

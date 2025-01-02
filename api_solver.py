@@ -45,7 +45,6 @@ class TurnstileAPIResult:
     status: str = "success"
     error: Optional[str] = None
 
-
 class PagePool:
     def __init__(self, context, debug: bool = False, log=None):
         self.context = context
@@ -88,7 +87,6 @@ class PagePool:
                 debug(f"Closed excess page. Total pages: {total_pages - 1}")
             else:
                 self.available_pages.append(page)
-
 
 class BrowserPool:
     def __init__(self, max_browsers=10, debug=False, log=None):
@@ -136,7 +134,6 @@ class BrowserPool:
             await browser.close()
         if self.playwright:
             await self.playwright.stop()
-
 
 class TurnstileAPIServer:
     HTML_TEMPLATE = """

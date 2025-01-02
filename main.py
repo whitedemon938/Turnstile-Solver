@@ -3,7 +3,7 @@ from typing import Dict
 from logmagix import Logger, Loader
 from sync_solver import get_turnstile_token as sync_solve
 from async_solver import get_turnstile_token as async_solve
-from api_solver import create_app
+from api_solver import TurnstileAPIServer
 
 class TurnstileTester:
     def __init__(self):
@@ -68,7 +68,7 @@ class TurnstileTester:
         self.log.info("Starting API server on http://localhost:5000")
         self.log.info("API documentation available at http://localhost:5000/")
         try:
-            app = create_app()
+            app = TurnstileAPIServer.create_app()
             import hypercorn.asyncio
             config = hypercorn.Config()
             config.bind = ["127.0.0.1:5000"]

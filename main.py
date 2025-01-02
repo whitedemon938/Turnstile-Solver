@@ -68,7 +68,7 @@ class TurnstileTester:
         self.log.info("Starting API server on http://localhost:5000")
         self.log.info("API documentation available at http://localhost:5000/")
         try:
-            app = TurnstileAPIServer.create_app()
+            app = TurnstileAPIServer().create_app()
             import hypercorn.asyncio
             config = hypercorn.Config()
             config.bind = ["127.0.0.1:5000"]

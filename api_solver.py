@@ -55,38 +55,69 @@ class PagePool:
         self._lock = asyncio.Lock()
         self.debug = debug
         self.log = log
+        self.max_wait_time = 30  # Maximum time to wait for a page in seconds
+        
+    async def _cleanup_page(self, page):
+        """Reset page state for reuse"""
+        try:
+            await page.goto("about:blank")
+            await page.evaluate("window.localStorage.clear()")
+            await page.evaluate("window.sessionStorage.clear()")
+            cookies = await page.context.cookies()
+            if cookies:
+                await page.context.clear_cookies()
+        except Exception as e:
+            debug(f"Error during page cleanup: {e}")
 
     async def initialize(self):
         """Create initial pool of pages"""
         for _ in range(self.min_size):
             page = await self.context.new_page()
             self.available_pages.append(page)
+        debug(f"Initialized page pool with {self.min_size} pages")
 
     async def get_page(self):
         """Get an available page from the pool or create a new one if needed"""
-        async with self._lock:
-            if (not self.available_pages and
-                    len(self.in_use_pages) < self.max_size):
-                page = await self.context.new_page()
-                debug(f"Created new page. Total pages: {len(self.in_use_pages) + 1}")
-            else:
-                while not self.available_pages:
-                    await asyncio.sleep(0.1)
-                page = self.available_pages.popleft()
-
-            self.in_use_pages.add(page)
-            return page
+        start_time = time.time()
+        while True:
+            async with self._lock:
+                if self.available_pages:
+                    page = self.available_pages.popleft()
+                    self.in_use_pages.add(page)
+                    debug(f"Reusing existing page. Available: {len(self.available_pages)}, In use: {len(self.in_use_pages)}")
+                    return page
+                
+                if len(self.in_use_pages) < self.max_size:
+                    page = await self.context.new_page()
+                    self.in_use_pages.add(page)
+                    debug(f"Created new page. Total pages: {len(self.in_use_pages)}")
+                    return page
+                
+            # If we reach here, we need to wait for a page
+            if time.time() - start_time > self.max_wait_time:
+                raise TimeoutError("Timeout waiting for available page")
+            await asyncio.sleep(0.5)
 
     async def return_page(self, page):
-        """Return a page to the pool or close it if we have too many"""
+        """Return a page to the pool after cleanup"""
         async with self._lock:
-            self.in_use_pages.remove(page)
-            total_pages = len(self.available_pages) + len(self.in_use_pages) + 1
-            if total_pages > self.min_size and len(self.available_pages) >= 2:
-                await page.close()
-                debug(f"Closed excess page. Total pages: {total_pages - 1}")
-            else:
-                self.available_pages.append(page)
+            if page in self.in_use_pages:
+                self.in_use_pages.remove(page)
+                
+                try:
+                    await self._cleanup_page(page)
+                    if len(self.available_pages) < self.max_size:
+                        self.available_pages.append(page)
+                        debug(f"Page returned to pool. Available: {len(self.available_pages)}")
+                    else:
+                        await page.close()
+                        debug("Excess page closed")
+                except Exception as e:
+                    debug(f"Error returning page to pool: {e}")
+                    try:
+                        await page.close()
+                    except:
+                        pass
 
 class BrowserPool:
     def __init__(self, max_browsers=10, debug=False, log=None):
@@ -195,17 +226,19 @@ class TurnstileAPIServer:
         start_time = time.time()
         loader = Loader(desc="Solving captcha...", timeout=0.05)
         loader.start()
+        page = None
 
-        browser = await self.browser_pool.get_browser()
         try:
-            context = await browser.new_context()
-            if browser not in self.page_pools:
-                self.page_pools[browser] = PagePool(context, debug=self.debug, log=self.log)
-                await self.page_pools[browser].initialize()
-            
-            page_pool = self.page_pools[browser]
-            page = await page_pool.get_page()
+            browser = await self.browser_pool.get_browser()
             try:
+                if browser not in self.page_pools:
+                    self.page_pools[browser] = PagePool(await browser.new_context(), debug=self.debug, log=self.log)
+                    await self.page_pools[browser].initialize()
+                
+                page_pool = self.page_pools[browser]
+                page = await page_pool.get_page()
+                
+                # Rest of the solving logic...
                 self.log.debug(f"Starting Turnstile solve for URL: {url}")
                 self.log.debug("Setting up page data and route")
 
@@ -281,12 +314,18 @@ class TurnstileAPIServer:
                     error=str(e)
                 )
             finally:
+                if page:
+                    await page_pool.return_page(page)
+                await self.browser_pool.return_browser(browser)
                 loader.stop()
-                self.log.debug("Clearing page state")
-                await page.goto("about:blank")
-                await page_pool.return_page(page)
-        finally:
-            await self.browser_pool.return_browser(browser)
+        except Exception as e:
+            loader.stop()
+            self.log.failure(f"Critical error: {str(e)}")
+            return TurnstileAPIResult(
+                result=None,
+                status="error",
+                error=str(e)
+            )
 
     async def process_turnstile(self):
         """Handle the /turnstile endpoint requests."""

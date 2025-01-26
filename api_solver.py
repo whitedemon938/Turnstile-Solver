@@ -61,11 +61,37 @@ class PagePool:
         """Reset page state for reuse"""
         try:
             await page.goto("about:blank")
-            await page.evaluate("window.localStorage.clear()")
-            await page.evaluate("window.sessionStorage.clear()")
-            cookies = await page.context.cookies()
-            if cookies:
+            
+            # Clear localStorage if possible
+            try:
+                await page.evaluate("""() => {
+                    try {
+                        window.localStorage.clear();
+                    } catch (e) {
+                        // Ignore security errors
+                    }
+                }""")
+            except Exception:
+                pass
+
+            # Clear sessionStorage if possible
+            try:
+                await page.evaluate("""() => {
+                    try {
+                        window.sessionStorage.clear();
+                    } catch (e) {
+                        // Ignore security errors
+                    }
+                }""")
+            except Exception:
+                pass
+
+            # Clear cookies
+            try:
                 await page.context.clear_cookies()
+            except Exception:
+                pass
+
         except Exception as e:
             debug(f"Error during page cleanup: {e}")
 

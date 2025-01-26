@@ -215,9 +215,9 @@ class ChallengeSolver: #TODO
     pass
 
 @debug
-def get_turnstile_token(headless: bool = False, url: str = None, sitekey: str = None, invisible: bool = False, cookies: dict = None) -> Dict:
+def get_turnstile_token(headless: bool = False, url: str = None, sitekey: str = None, invisible: bool = False, cookies: dict = None, debug: bool = False) -> Dict:
     """Legacy wrapper function for backward compatibility."""
-    solver = TurnstileSolver(debug=False)
+    solver = TurnstileSolver(debug=debug)
     result = solver.solve(url=url, sitekey=sitekey, headless=headless, invisible=invisible, cookies=cookies)
     return result.__dict__
 

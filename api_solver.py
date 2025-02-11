@@ -419,9 +419,7 @@ class TurnstileAPIServer:
                 <div class="bg-blue-100 border-l-4 border-blue-500 p-4 mb-6">
                     <p class="text-blue-700">This project is inspired by 
                        <a href="https://github.com/Body-Alhoha/turnaround" class="text-blue-600 hover:underline">Turnaround</a> 
-                       and is currently maintained by 
-                       <a href="https://github.com/Theyka" class="text-blue-600 hover:underline">Theyka</a> 
-                       and <a href="https://github.com/sexfrance" class="text-blue-600 hover:underline">Sexfrance</a>.</p>
+                       and is currently maintained by  <a href="https://github.com/sexfrance" class="text-blue-600 hover:underline">Sexfrance</a>.</p>
                 </div>
             </div>
         </body>

@@ -14,8 +14,6 @@ RUN pip install --no-cache-dir patchright && patchright install chromium
 # Copy the rest of the application files
 COPY . .
 
-# Expose the necessary port (if applicable)
-EXPOSE 8000  # Change this if your app runs on a different port
 
 # Run the application
-CMD ["python", "main.py"]
+CMD ["python3", "main.py"]

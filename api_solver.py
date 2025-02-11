@@ -222,6 +222,13 @@ class TurnstileAPIServer:
         self.page_pools = {}
         self.browser_args = [
             "--disable-blink-features=AutomationControlled",
+            "--no-sandbox",
+            "--disable-dev-shm-usage",
+            "--disable-background-networking",
+            "--disable-background-timer-throttling",
+            "--disable-backgrounding-occluded-windows",
+            "--disable-renderer-backgrounding",
+            "--window-position=2000,2000",
         ]
         self._setup_routes()
 
@@ -258,12 +265,14 @@ class TurnstileAPIServer:
             browser = await self.browser_pool.get_browser()
             try:
                 if browser not in self.page_pools:
-                    self.page_pools[browser] = PagePool(await browser.new_context(), debug=self.debug, log=self.log)
+                    context = await browser.new_context()
+                    self.page_pools[browser] = PagePool(context, debug=self.debug, log=self.log)
                     await self.page_pools[browser].initialize()
                 
                 page_pool = self.page_pools[browser]
                 page = await page_pool.get_page()
-                
+
+                # Rest of the code remains the same until the response retrieval loop
                 # Rest of the solving logic...
                 self.log.debug(f"Starting Turnstile solve for URL: {url}")
                 self.log.debug("Setting up page data and route")
@@ -300,8 +309,10 @@ class TurnstileAPIServer:
                     if turnstile_check == "":
                         self.log.debug(f"Attempt {attempts + 1}: No Turnstile response yet")
                         
-                        await page.evaluate("document.querySelector('.cf-turnstile').style.width = '70px'")
-                        await page.click(".cf-turnstile")
+                        if not invisible:
+                            await page.evaluate("document.querySelector('.cf-turnstile').style.width = '70px'")
+                            await page.click(".cf-turnstile")
+                            
                         await asyncio.sleep(0.5)
                         attempts += 1
                     else:
@@ -358,7 +369,11 @@ class TurnstileAPIServer:
         try:
             url = request.args.get('url')
             sitekey = request.args.get('sitekey')
-            invisible = request.args.get('invisible', 'false').lower() == 'true'
+            invisible = request.args.get('invisible', 'false').lower()
+       
+            cookies_str = request.args.get('cookies')
+            
+            cookies = json.loads(cookies_str) if cookies_str else None
             
             if not url or not sitekey:
                 return jsonify({
@@ -370,7 +385,8 @@ class TurnstileAPIServer:
                 url=url,
                 sitekey=sitekey,
                 invisible=invisible,
-                headless=False
+                headless=False,
+                cookies=cookies
             )
             
             return jsonify({

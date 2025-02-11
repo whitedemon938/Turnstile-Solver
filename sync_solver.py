@@ -1,9 +1,7 @@
 import time
 
-
 from typing import Dict, Optional
 from dataclasses import dataclass
-from zlib import decompress
 from patchright.sync_api import sync_playwright, Page, BrowserContext
 from logmagix import Logger, Loader
 from functools import wraps

@@ -435,7 +435,7 @@ class TurnstileAPIServer:
 if __name__ == "__main__":
     server = TurnstileAPIServer(debug=True)
     app = server.create_app()
-    app.run()
+    app.run(host="0.0.0.0")
 
 # Credits for the changes: github.com/sexfrance
 # Credit for the original script: github.com/Theyka

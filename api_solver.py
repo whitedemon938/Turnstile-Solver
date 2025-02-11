@@ -370,7 +370,7 @@ class TurnstileAPIServer:
                 url=url,
                 sitekey=sitekey,
                 invisible=invisible,
-                headless=True
+                headless=False
             )
             
             return jsonify({

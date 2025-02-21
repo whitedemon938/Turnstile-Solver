@@ -146,7 +146,7 @@ class PagePool:
                         pass
 
 class BrowserPool:
-    def __init__(self, max_browsers=10, debug=False, log=None):
+    def __init__(self, max_browsers=10, debug=False, log=None, headless=False, useragent=None):
         self.max_browsers = max_browsers
         self.available_browsers: deque = deque()
         self.in_use_browsers: set = set()
@@ -154,6 +154,25 @@ class BrowserPool:
         self.debug = debug
         self.log = log
         self.playwright = None
+        self.headless = headless
+        self.useragent = useragent
+        
+        self.browser_args = [
+            "--disable-blink-features=AutomationControlled",
+            "--no-sandbox",
+            "--disable-dev-shm-usage",
+            "--disable-background-networking",
+            "--disable-background-timer-throttling",
+            "--disable-backgrounding-occluded-windows",
+            "--disable-renderer-backgrounding",
+            "--window-position=2000,2000",
+        ]
+
+        if self.useragent:
+            self.browser_args.append(f"--user-agent={self.useragent}")
+
+        if self.headless and not self.useragent:
+            log.warning("To solve captchas with headless mode you need to set the useragent!")
 
     async def initialize(self):
         """Initialize the playwright and create initial browser pool"""
@@ -166,8 +185,8 @@ class BrowserPool:
     async def _create_browser(self):
         """Create a new browser instance"""
         return await self.playwright.chromium.launch(
-            headless=False,
-            args=["--disable-blink-features=AutomationControlled"]
+            headless=self.headless,
+            args=self.browser_args
         )
 
     async def get_browser(self):
@@ -212,7 +231,7 @@ class TurnstileAPIServer:
     </html>
     """
 
-    def __init__(self, debug: bool = False):
+    def __init__(self, debug: bool = False, headless: bool = False, useragent: Optional[str] = None):
         global DEBUG
         DEBUG = debug
         self.debug = debug
@@ -220,16 +239,8 @@ class TurnstileAPIServer:
         self.log = Logger(github_repository="https://github.com/sexfrance/Turnstile-Solver")
         self.browser_pool = None
         self.page_pools = {}
-        self.browser_args = [
-            "--disable-blink-features=AutomationControlled",
-            "--no-sandbox",
-            "--disable-dev-shm-usage",
-            "--disable-background-networking",
-            "--disable-background-timer-throttling",
-            "--disable-backgrounding-occluded-windows",
-            "--disable-renderer-backgrounding",
-            "--window-position=2000,2000",
-        ]
+        self.headless = headless
+        self.useragent = useragent
         self._setup_routes()
 
     def _setup_routes(self) -> None:
@@ -245,7 +256,9 @@ class TurnstileAPIServer:
             self.browser_pool = BrowserPool(
                 max_browsers=10,
                 debug=self.debug,
-                log=self.log
+                log=self.log,
+                headless=self.headless,
+                useragent=self.useragent
             )
             await self.browser_pool.initialize()
             self.log.success("Browser pool initialized successfully")
@@ -254,12 +267,11 @@ class TurnstileAPIServer:
             raise
 
     @debug
-    async def _solve_turnstile(self, url: str, sitekey: str, invisible: bool = False, headless: bool = False, cookies: dict = None) -> TurnstileAPIResult:
+    async def _solve_turnstile(self, url: str, sitekey: str, invisible: bool = False, cookies: dict = None, action: str = None, cdata: str = None) -> TurnstileAPIResult:
         """Solve the Turnstile challenge using browser pool."""
         start_time = time.time()
         loader = Loader(desc="Solving captcha...", timeout=0.05)
         loader.start()
-        page = None
 
         try:
             browser = await self.browser_pool.get_browser()
@@ -272,8 +284,6 @@ class TurnstileAPIServer:
                 page_pool = self.page_pools[browser]
                 page = await page_pool.get_page()
 
-                # Rest of the code remains the same until the response retrieval loop
-                # Rest of the solving logic...
                 self.log.debug(f"Starting Turnstile solve for URL: {url}")
                 self.log.debug("Setting up page data and route")
 
@@ -291,7 +301,7 @@ class TurnstileAPIServer:
                         await page.context.add_cookies(cookie_list)
 
                 url_with_slash = url + "/" if not url.endswith("/") else url
-                turnstile_div = f'<div class="cf-turnstile" data-sitekey="{sitekey}" data-theme="light"></div>'
+                turnstile_div = f'<div class="cf-turnstile" data-sitekey="{sitekey}"' + (f' data-action="{action}"' if action else '') + (f' data-cdata="{cdata}"' if cdata else '') + '></div>'
                 page_data = self.HTML_TEMPLATE.replace("<!-- cf turnstile -->", turnstile_div)
 
                 await page.route(url_with_slash, lambda route: route.fulfill(body=page_data, status=200))
@@ -369,9 +379,12 @@ class TurnstileAPIServer:
         try:
             url = request.args.get('url')
             sitekey = request.args.get('sitekey')
-            invisible = request.args.get('invisible', 'false').lower()
-       
+            invisible = request.args.get('invisible', 'false').lower() == 'true'
+            action = request.args.get('action')
+            cdata = request.args.get('cdata')
             cookies_str = request.args.get('cookies')
+            headless = request.args.get('headless', 'false').lower() == 'true'
+            useragent = request.args.get('useragent')
             
             cookies = json.loads(cookies_str) if cookies_str else None
             
@@ -384,8 +397,9 @@ class TurnstileAPIServer:
             result = await self._solve_turnstile(
                 url=url,
                 sitekey=sitekey,
+                action=action,
+                cdata=cdata,
                 invisible=invisible,
-                headless=False,
                 cookies=cookies
             )
             
@@ -447,7 +461,11 @@ class TurnstileAPIServer:
         return self.app
 
 if __name__ == "__main__":
-    server = TurnstileAPIServer(debug=True)
+    server = TurnstileAPIServer(
+        debug=True,
+        headless=False,  # Set this to True to run in headless mode
+        useragent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"  # Optional: Set a custom user agent
+    )
     app = server.create_app()
     app.run(host="0.0.0.0")
 

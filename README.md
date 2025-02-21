@@ -7,7 +7,7 @@ A Python-based solution for solving Cloudflare Turnstile challenges quickly (4-6
     <br />
     <a href="https://discord.cyberious.xyz">💬 Discord</a>
     ·
-    <a href="https://github.com/sexfrance/Turnstile-Solver#-changelog">📜 ChangeLog</a>
+    <a href="#-changelog">📜 ChangeLog</a>
     ·
     <a href="https://github.com/sexfrance/Turnstile-Solver/issues">⚠️ Report Bug</a>
     ·
@@ -34,20 +34,63 @@ A Python-based solution for solving Cloudflare Turnstile challenges quickly (4-6
   - Synchronous solver for simple use cases
   - Asynchronous solver for better performance
   - API server for web-based integrations
-- **Resource Optimization**: Smart browser and page lifecycle management
-- **Debug Logging**: Detailed debug logs for troubleshooting
-- **Cookie Support**: Ability to set custom cookies for authentication
-- **Automatic Cleanup**: Proper resource management and cleanup
-- **Interactive Interface**: Easy-to-use command-line interface to access all solvers
-- **API Documentation**: Built-in web interface with API usage documentation
-- **Invisible & Visible Support**: Works with both invisible and visible Turnstile challenges
-- **Error Handling**: Comprehensive error handling and reporting
+- **Browser Configuration**:
+  - Headless mode support with user agent customization
+  - Automated browser cleanup and session management
+  - Custom user agent support for better stealth
+- **Resource Optimization**:
+  - Smart browser and page lifecycle management
+  - Efficient memory usage and cleanup
+  - Automatic resource scaling
+- **Advanced Features**:
+  - Cookie support for authentication
+  - Custom action and cdata parameters
+  - Invisible & visible challenge support
+  - Comprehensive error handling
+- **Developer Tools**:
+  - Debug logging system
+  - Interactive CLI interface
+  - Built-in API documentation
+  - Performance metrics tracking
 
 ---
 
 #### 📹 Preview
 
 ![Preview](https://i.imgur.com/YI6RZ5P.gif)
+
+---
+
+### 🚀 Usage Examples
+
+```python
+# Synchronous Usage
+from sync_solver import get_turnstile_token
+
+result = get_turnstile_token(
+    url="https://example.com",
+    sitekey="your-site-key",
+    invisible=True,
+    headless=True,
+    user_agent="Mozilla/5.0 ..."
+)
+
+# Asynchronous Usage
+from async_solver import get_turnstile_token
+import asyncio
+
+async def main():
+    result = await get_turnstile_token(
+        url="https://example.com",
+        sitekey="your-site-key",
+        invisible=True,
+        headless=True,
+        user_agent="Mozilla/5.0 ..."
+    )
+
+# API Server Usage
+curl "http://localhost:5000/turnstile?url=https://example.com&sitekey=your-site-key&invisible=true&headless=true&useragent=Mozilla/5.0..."
+```
 
 ---
 
@@ -78,18 +121,27 @@ v0.0.3 ⋮ 11/7/2024
 + Added concurrent processing support
 
 v0.0.4 ⋮ 12/7/2024
-+ Minor bug fixes
-+ Added invisible cloudflare support
-+ Removed headless option as it is not useful
 + Added cookie support for authentication
++ Added action and cdata parameter support
++ Enhanced invisible Turnstile support
++ Improved browser management
 
 v0.0.5 ⋮ 12/24/2024
-+ Implemented browser pooling system (10 concurrent browsers)
++ Implemented browser pooling system
 + Added page pooling for each browser
-+ Improved resource management
-+ Added interactive CLI interface
-+ Enhanced error handling and debugging
++ Enhanced browser stealth features
++ Added headless mode with user agent support
++ Improved resource cleanup and management
++ Added comprehensive error handling
 + Optimized browser lifecycle management
+
+v0.0.6 ⋮ 12/31/2024
++ Added custom user agent support
++ Enhanced headless mode stability
++ Improved browser argument handling
++ Added automatic scaling for resources
++ Enhanced error reporting system
++ Optimized page cleanup process
 ```
 
 ---

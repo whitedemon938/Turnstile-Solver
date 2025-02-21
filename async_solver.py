@@ -6,12 +6,6 @@ from patchright.async_api import async_playwright, Page, BrowserContext
 from logmagix import Logger, Loader
 from functools import wraps
 
-DEBUG = False
-
-def set_debug(value: bool):
-    global DEBUG
-    DEBUG = value
-
 def debug(func_or_message, *args, **kwargs):
     global DEBUG
     if callable(func_or_message):
@@ -53,10 +47,12 @@ class AsyncTurnstileSolver:
     </html>
     """
 
-    def __init__(self, debug: bool = False):
+    def __init__(self, debug: bool = False, headless: Optional[bool] = False, useragent: Optional[str] = None):
         global DEBUG
         DEBUG = debug
         self.debug = debug
+        self.headless = headless
+        self.useragent = useragent
         self.log = Logger(github_repository="https://github.com/sexfrance/Turnstile-Solver")
         self.loader = Loader(desc="Solving captcha...", timeout=0.05)
         self.browser_args = [
@@ -69,6 +65,9 @@ class AsyncTurnstileSolver:
             "--disable-renderer-backgrounding",
             "--window-position=2000,2000",
         ]
+
+        if self.useragent:
+            self.browser_args.append(f"--user-agent={self.useragent}")
 
     @debug
     async def _setup_page(self, context: BrowserContext, url: str, sitekey: str = None) -> Page:
@@ -114,7 +113,7 @@ class AsyncTurnstileSolver:
 
         return None
 
-    async def solve(self, url: str, sitekey: str = None, headless: bool = False, invisible: bool = False, cookies: dict = None) -> TurnstileResult:
+    async def solve(self, url: str, sitekey: str = None, invisible: bool = False, cookies: dict = None) -> TurnstileResult:
         """
         Solve the Turnstile challenge and return the result.
         
@@ -133,7 +132,7 @@ class AsyncTurnstileSolver:
 
         try:
             async with async_playwright() as playwright:
-                browser = await playwright.chromium.launch(headless=headless, args=self.browser_args)
+                browser = await playwright.chromium.launch(headless=self.headless, args=self.browser_args)
                 context = await browser.new_context()
 
                 if cookies:
@@ -204,10 +203,10 @@ class AsyncTurnstileSolver:
         return result
 
 @debug
-async def get_turnstile_token(headless: bool = False, url: str = None, sitekey: str = None, invisible: bool = False, cookies: dict = None) -> Dict:
+async def get_turnstile_token(headless: bool = False, url: str = None, sitekey: str = None, invisible: bool = False, cookies: dict = None, user_agent: str = None, debug: bool = True) -> Dict:
     """Legacy wrapper function for backward compatibility."""
-    solver = AsyncTurnstileSolver()
-    result = await solver.solve(url=url, sitekey=sitekey, headless=headless, invisible=invisible, cookies=cookies)
+    solver = AsyncTurnstileSolver(headless=headless, useragent=user_agent, debug=debug)
+    result = await solver.solve(url=url, sitekey=sitekey, invisible=invisible, cookies=cookies)
     return result.__dict__
 
 if __name__ == "__main__":

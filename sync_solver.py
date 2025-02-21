@@ -53,9 +53,10 @@ class TurnstileSolver:
     </html>
     """
 
-    def __init__(self, debug: bool = False):
-        global DEBUG
-        self.debug = DEBUG
+    def __init__(self, debug: bool = False, headless: Optional[bool] = None, useragent: Optional[str] = None):
+        self.debug = debug
+        self.headless = headless if headless is not None else False
+        self.useragent = useragent
         self.log = Logger(github_repository="https://github.com/sexfrance/Turnstile-Solver")
         self.loader = Loader(desc="Solving captcha...", timeout=0.05)
         
@@ -69,6 +70,12 @@ class TurnstileSolver:
             "--disable-renderer-backgrounding",
             "--window-position=2000,2000",
         ]
+
+        if self.useragent:
+            self.browser_args.append(f"--user-agent={self.useragent}")
+
+        if self.headless and not self.useragent:
+            self.log.warning("To solve captchas with headless mode you need to set the useragent!")
  
 
     @debug
@@ -117,7 +124,7 @@ class TurnstileSolver:
         return None
 
     @debug
-    def solve(self, url: str, sitekey: str = None, headless: bool = False, invisible: bool = False, cookies: dict = None) -> TurnstileResult:
+    def solve(self, url: str, sitekey: str = None, invisible: bool = False, cookies: dict = None) -> TurnstileResult:
         """
         Solve the Turnstile challenge and return the result.
         
@@ -137,7 +144,7 @@ class TurnstileSolver:
 
         try:
             with sync_playwright() as playwright:
-                browser = playwright.chromium.launch(headless=headless, args=self.browser_args)
+                browser = playwright.chromium.launch(headless=self.headless, args=self.browser_args)
                 context = browser.new_context()
                 
                 if cookies:
@@ -213,10 +220,10 @@ class ChallengeSolver: #TODO
     pass
 
 @debug
-def get_turnstile_token(headless: bool = False, url: str = None, sitekey: str = None, invisible: bool = False, cookies: dict = None, debug: bool = False) -> Dict:
+def get_turnstile_token(headless: bool = False, url: str = None, sitekey: str = None, invisible: bool = False, cookies: dict = None, user_agent: str = None, debug: bool = False) -> Dict:
     """Legacy wrapper function for backward compatibility."""
-    solver = TurnstileSolver(debug=debug)
-    result = solver.solve(url=url, sitekey=sitekey, headless=headless, invisible=invisible, cookies=cookies)
+    solver = TurnstileSolver(headless=headless, useragent=user_agent, debug=debug)
+    result = solver.solve(url=url, sitekey=sitekey, invisible=invisible, cookies=cookies)
     return result.__dict__
 
 if __name__ == "__main__":

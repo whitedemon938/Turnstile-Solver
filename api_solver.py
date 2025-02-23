@@ -241,6 +241,7 @@ class TurnstileAPIServer:
         self.page_pools = {}
         self.headless = headless
         self.useragent = useragent
+        self.loader = Loader(desc="Solving captcha...", timeout=0.05)
         self._setup_routes()
 
     def _setup_routes(self) -> None:
@@ -270,8 +271,7 @@ class TurnstileAPIServer:
     async def _solve_turnstile(self, url: str, sitekey: str, invisible: bool = False, cookies: dict = None, action: str = None, cdata: str = None) -> TurnstileAPIResult:
         """Solve the Turnstile challenge using browser pool."""
         start_time = time.time()
-        loader = Loader(desc="Solving captcha...", timeout=0.05)
-        loader.start()
+        self.loader.start()
 
         try:
             browser = await self.browser_pool.get_browser()
@@ -364,9 +364,9 @@ class TurnstileAPIServer:
                 if page:
                     await page_pool.return_page(page)
                 await self.browser_pool.return_browser(browser)
-                loader.stop()
+                self.loader.stop()
         except Exception as e:
-            loader.stop()
+            self.loader.stop()
             self.log.failure(f"Critical error: {str(e)}")
             return TurnstileAPIResult(
                 result=None,
@@ -385,6 +385,11 @@ class TurnstileAPIServer:
             cookies_str = request.args.get('cookies')
             headless = request.args.get('headless', 'false').lower() == 'true'
             useragent = request.args.get('useragent')
+            debug_mode = request.args.get('debug', 'false').lower() == 'true'
+            
+            if debug_mode:
+                set_debug(True)
+                self.log.debug("Debug mode enabled for this request")
             
             cookies = json.loads(cookies_str) if cookies_str else None
             
@@ -394,6 +399,9 @@ class TurnstileAPIServer:
                     'error': 'Missing required parameters: url and sitekey'
                 }), 400
 
+            self.headless = headless
+            self.useragent = useragent
+
             result = await self._solve_turnstile(
                 url=url,
                 sitekey=sitekey,
@@ -402,6 +410,9 @@ class TurnstileAPIServer:
                 invisible=invisible,
                 cookies=cookies
             )
+            
+            if debug_mode:
+                self.log.debug(f"Request completed with result: {result}")
             
             return jsonify({
                 'status': result.status,
@@ -463,8 +474,8 @@ class TurnstileAPIServer:
 if __name__ == "__main__":
     server = TurnstileAPIServer(
         debug=True,
-        headless=False,  # Set this to True to run in headless mode
-        useragent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"  # Optional: Set a custom user agent
+        headless=False,
+        useragent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     )
     app = server.create_app()
     app.run(host="0.0.0.0")

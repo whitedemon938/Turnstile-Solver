@@ -101,6 +101,95 @@ curl "http://localhost:5000/turnstile?url=https://example.com&sitekey=your-site-
 
 ---
 
+### 🔧 Command line arguments
+
+| Parameter      | Default     | Type      | Description                                                                       |
+| -------------- | ----------- | --------- | --------------------------------------------------------------------------------- |
+| `--headless`   | `False`     | `boolean` | Runs the browser in headless mode. Requires the `--useragent` argument to be set. |
+| `--useragent`  | `None`      | `string`  | Specifies a custom User-Agent string for the browser.                             |
+| `--debug`      | `False`     | `boolean` | Enables or disables debug mode for additional logging and troubleshooting.        |
+| `--persistent` | `False`     | `boolean` | Enables a persistent browser context.                                             |
+| `--thread`     | `1`         | `integer` | Sets the number of browser threads to use in multi-threaded mode.                 |
+| `--host`       | `127.0.0.1` | `string`  | Specifies the IP address the API solver runs on.                                  |
+| `--port`       | `5000`      | `integer` | Sets the port the API solver listens on.                                          |
+
+---
+
+### 🐳 Docker Image
+
+#### Running the Container
+
+To start the container, use:
+
+- Change the TZ environment variable and ports to the correct one for yourself:
+
+```sh
+docker run -d -p 3389:3389 -p 5000:5000 -e TZ=Asia/Baku --name turnstile_solver theyka/turnstile_solver:latest
+```
+
+#### Connecting to the Container
+
+1. Use an **RDP client** (like Windows Remote Desktop, Remmina, or FreeRDP)
+2. Connect to `localhost:3389`
+3. Login with the default user:
+   - **Username:** root
+   - **Password:** root
+4. After this, you can start the solver by navigating to the `Turnstile-Solver` folder.
+
+---
+
+### 📡 API Documentation
+
+#### Solve turnstile
+
+```http
+  GET /turnstile?url=https://example.com&sitekey=0x4AAAAAAA
+```
+
+#### Request Parameters:
+
+| Parameter | Type   | Description                                                          | Required |
+| --------- | ------ | -------------------------------------------------------------------- | -------- |
+| `url`     | string | The target URL containing the CAPTCHA. (e.g., `https://example.com`) | Yes      |
+| `sitekey` | string | The site key for the CAPTCHA to be solved. (e.g., `0x4AAAAAAA`)      | Yes      |
+| `action`  | string | Action to trigger during CAPTCHA solving, e.g., `login`              | No       |
+| `cdata`   | string | Custom data that can be used for additional CAPTCHA parameters.      | No       |
+
+#### Response:
+
+If the request is successfully received, the server will respond with a `task_id` for the CAPTCHA solving task:
+
+```json
+{
+  "task_id": "d2cbb257-9c37-4f9c-9bc7-1eaee72d96a8"
+}
+```
+
+#### Get Result
+
+```http
+  GET /result?id=f0dbe75b-fa76-41ad-89aa-4d3a392040af
+```
+
+#### Request Parameters:
+
+| Parameter | Type   | Description                                                | Required |
+| --------- | ------ | ---------------------------------------------------------- | -------- |
+| `id`      | string | The unique task ID returned from the `/turnstile` request. | Yes      |
+
+#### Response:
+
+If the CAPTCHA is solved successfully, the server will respond with the following information:
+
+```json
+{
+  "elapsed_time": 7.625,
+  "value": "0.KBtT-r"
+}
+```
+
+---
+
 ### 📜 ChangeLog
 
 ```diff
@@ -142,6 +231,26 @@ v0.0.6 ⋮ 12/31/2024
 + Added automatic scaling for resources
 + Enhanced error reporting system
 + Optimized page cleanup process
+
+v0.1.0 ⋮ 11/7/2024
++ Added API server implementation
++ Added web interface for API documentation
++ Improved error handling and logging
++ Added concurrent processing support
+
+v0.1.1 ⋮ 15/2/2025
++ Added --headless argument
++ Added --debug argument
++ Added --useragent argument
+! Modified logging method to use the logging library
+
+v0.1.2 ⋮ 19/02/2025
++ Added optional action and cData parameters, similar to sitekey and url.
+
+v0.1.3 ⋮ 22/02/2025
++ Added persistent context browser for improved security
++ Implemented multi-threaded mode for enhanced performance
++ Added method to configure host and port for API server
 ```
 
 ---

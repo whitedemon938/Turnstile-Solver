@@ -1,15 +1,55 @@
-import asyncio
+import os
+import sys
 import time
+import uuid
 import json
-
-
-from typing import Dict, Optional
-from dataclasses import dataclass
-from patchright.async_api import async_playwright, Page, BrowserContext
-from logmagix import Logger, Loader
+import random
+import string
+import logging
+import asyncio
+import argparse
 from quart import Quart, request, jsonify
-from collections import deque
-from functools import wraps
+from camoufox.async_api import AsyncCamoufox
+from patchright.async_api import async_playwright
+from logmagix import Logger, Loader
+
+COLORS = {
+    'MAGENTA': '\033[35m',
+    'BLUE': '\033[34m',
+    'GREEN': '\033[32m',
+    'YELLOW': '\033[33m',
+    'RED': '\033[31m',
+    'RESET': '\033[0m',
+}
+
+
+class CustomLogger(logging.Logger):
+    @staticmethod
+    def format_message(level, color, message):
+        timestamp = time.strftime('%H:%M:%S')
+        return f"[{timestamp}] [{COLORS.get(color)}{level}{COLORS.get('RESET')}] -> {message}"
+
+    def debug(self, message, *args, **kwargs):
+        super().debug(self.format_message('DEBUG', 'MAGENTA', message), *args, **kwargs)
+
+    def info(self, message, *args, **kwargs):
+        super().info(self.format_message('INFO', 'BLUE', message), *args, **kwargs)
+
+    def success(self, message, *args, **kwargs):
+        super().info(self.format_message('SUCCESS', 'GREEN', message), *args, **kwargs)
+
+    def warning(self, message, *args, **kwargs):
+        super().warning(self.format_message('WARNING', 'YELLOW', message), *args, **kwargs)
+
+    def error(self, message, *args, **kwargs):
+        super().error(self.format_message('ERROR', 'RED', message), *args, **kwargs)
+
+
+logging.setLoggerClass(CustomLogger)
+logger = logging.getLogger("TurnstileAPIServer")
+logger.setLevel(logging.DEBUG)
+handler = logging.StreamHandler(sys.stdout)
+logger.addHandler(handler)
 
 DEBUG = False
 
@@ -17,425 +57,298 @@ def set_debug(value: bool):
     global DEBUG
     DEBUG = value
 
-def debug(func_or_message, *args, **kwargs):
-    global DEBUG
-    if callable(func_or_message):
-        @wraps(func_or_message)
-        async def wrapper(*args, **kwargs):
-            result = await func_or_message(*args, **kwargs)
-            if DEBUG:
-                Logger().debug(f"{func_or_message.__name__} returned: {result}")
-            return result
-        return wrapper
-    else:
-        if DEBUG:
-            Logger().debug(f"Debug: {func_or_message}")
-
-@dataclass
-class TurnstileResult:
-    turnstile_value: Optional[str]
-    elapsed_time_seconds: float
-    status: str
-    reason: Optional[str] = None
-
-@dataclass
-class TurnstileAPIResult:
-    result: Optional[str]
-    elapsed_time_seconds: Optional[float] = None
-    status: str = "success"
-    error: Optional[str] = None
-
-class PagePool:
-    def __init__(self, context, debug: bool = False, log=None):
-        self.context = context
-        self.min_size = 1
-        self.max_size = 10
-        self.available_pages: deque = deque()
-        self.in_use_pages: set = set()
-        self._lock = asyncio.Lock()
-        self.debug = debug
-        self.log = log
-        self.max_wait_time = 30  # Maximum time to wait for a page in seconds
-        
-    async def _cleanup_page(self, page):
-        """Reset page state for reuse"""
-        try:
-            await page.goto("about:blank")
-            
-            # Clear localStorage if possible
-            try:
-                await page.evaluate("""() => {
-                    try {
-                        window.localStorage.clear();
-                    } catch (e) {
-                        // Ignore security errors
-                    }
-                }""")
-            except Exception:
-                pass
-
-            # Clear sessionStorage if possible
-            try:
-                await page.evaluate("""() => {
-                    try {
-                        window.sessionStorage.clear();
-                    } catch (e) {
-                        // Ignore security errors
-                    }
-                }""")
-            except Exception:
-                pass
-
-            # Clear cookies
-            try:
-                await page.context.clear_cookies()
-            except Exception:
-                pass
-
-        except Exception as e:
-            debug(f"Error during page cleanup: {e}")
-
-    async def initialize(self):
-        """Create initial pool of pages"""
-        for _ in range(self.min_size):
-            page = await self.context.new_page()
-            self.available_pages.append(page)
-        debug(f"Initialized page pool with {self.min_size} pages")
-
-    async def get_page(self):
-        """Get an available page from the pool or create a new one if needed"""
-        start_time = time.time()
-        while True:
-            async with self._lock:
-                if self.available_pages:
-                    page = self.available_pages.popleft()
-                    self.in_use_pages.add(page)
-                    debug(f"Reusing existing page. Available: {len(self.available_pages)}, In use: {len(self.in_use_pages)}")
-                    return page
-                
-                if len(self.in_use_pages) < self.max_size:
-                    page = await self.context.new_page()
-                    self.in_use_pages.add(page)
-                    debug(f"Created new page. Total pages: {len(self.in_use_pages)}")
-                    return page
-                
-            # If we reach here, we need to wait for a page
-            if time.time() - start_time > self.max_wait_time:
-                raise TimeoutError("Timeout waiting for available page")
-            await asyncio.sleep(0.5)
-
-    async def return_page(self, page):
-        """Return a page to the pool after cleanup"""
-        async with self._lock:
-            if page in self.in_use_pages:
-                self.in_use_pages.remove(page)
-                
-                try:
-                    await self._cleanup_page(page)
-                    if len(self.available_pages) < self.max_size:
-                        self.available_pages.append(page)
-                        debug(f"Page returned to pool. Available: {len(self.available_pages)}")
-                    else:
-                        await page.close()
-                        debug("Excess page closed")
-                except Exception as e:
-                    debug(f"Error returning page to pool: {e}")
-                    try:
-                        await page.close()
-                    except:
-                        pass
-
-class BrowserPool:
-    def __init__(self, max_browsers=10, debug=False, log=None):
-        self.max_browsers = max_browsers
-        self.available_browsers: deque = deque()
-        self.in_use_browsers: set = set()
-        self._lock = asyncio.Lock()
-        self.debug = debug
-        self.log = log
-        self.playwright = None
-
-    async def initialize(self):
-        """Initialize the playwright and create initial browser pool"""
-        self.playwright = await async_playwright().start()
-        for _ in range(self.max_browsers):
-            browser = await self._create_browser()
-            self.available_browsers.append(browser)
-            debug(f"Created browser {_ + 1}/{self.max_browsers}")
-
-    async def _create_browser(self):
-        """Create a new browser instance"""
-        return await self.playwright.chromium.launch(
-            headless=False,
-            args=["--disable-blink-features=AutomationControlled"]
-        )
-
-    async def get_browser(self):
-        """Get an available browser from the pool"""
-        async with self._lock:
-            while not self.available_browsers:
-                await asyncio.sleep(0.1)
-            browser = self.available_browsers.popleft()
-            self.in_use_browsers.add(browser)
-            return browser
-
-    async def return_browser(self, browser):
-        """Return a browser to the pool"""
-        async with self._lock:
-            self.in_use_browsers.remove(browser)
-            self.available_browsers.append(browser)
-
-    async def cleanup(self):
-        """Close all browsers and cleanup"""
-        for browser in list(self.available_browsers) + list(self.in_use_browsers):
-            await browser.close()
-        if self.playwright:
-            await self.playwright.stop()
 
 class TurnstileAPIServer:
     HTML_TEMPLATE = """
     <!DOCTYPE html>
     <html lang="en">
-      <head>
-        <meta charset="UTF-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Turnstile Solver</title>
-        <script
-          src="https://challenges.cloudflare.com/turnstile/v0/api.js?onload=onloadTurnstileCallback"
-          async=""
-          defer=""
-        ></script>
-      </head>
-      <body>
+        <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async></script>
+    </head>
+    <body>
         <!-- cf turnstile -->
-      </body>
+    </body>
     </html>
     """
 
-    def __init__(self, debug: bool = False):
+    def __init__(self, headless: bool, useragent: str, debug: bool, browser_type: str, thread: int):
         global DEBUG
         DEBUG = debug
         self.debug = debug
         self.app = Quart(__name__)
         self.log = Logger(github_repository="https://github.com/sexfrance/Turnstile-Solver")
-        self.browser_pool = None
-        self.page_pools = {}
-        self.browser_args = [
-            "--disable-blink-features=AutomationControlled",
-        ]
+        self.loader = Loader(desc="Solving captcha...", timeout=0.05)
+        self.results = self._load_results()
+        self.browser_type = browser_type
+        self.headless = headless
+        self.useragent = useragent
+        self.thread_count = thread
+        self.browser_pool = asyncio.Queue()
+        self.browser_args = []
+        if useragent:
+            self.browser_args.append(f"--user-agent={useragent}")
+
         self._setup_routes()
+
+    @staticmethod
+    def _load_results():
+        """Load previous results from results.json."""
+        try:
+            if os.path.exists("results.json"):
+                with open("results.json", "r") as f:
+                    return json.load(f)
+        except (json.JSONDecodeError, IOError) as e:
+            logger.warning(f"Error loading results: {str(e)}. Starting with an empty results dictionary.")
+        return {}
+
+    def _save_results(self):
+        """Save results to results.json."""
+        try:
+            with open("results.json", "w") as result_file:
+                json.dump(self.results, result_file, indent=4)
+        except IOError as e:
+            logger.error(f"Error saving results to file: {str(e)}")
 
     def _setup_routes(self) -> None:
         """Set up the application routes."""
         self.app.before_serving(self._startup)
         self.app.route('/turnstile', methods=['GET'])(self.process_turnstile)
+        self.app.route('/result', methods=['GET'])(self.get_result)
         self.app.route('/')(self.index)
 
     async def _startup(self) -> None:
-        """Initialize the browser pool on startup."""
-        self.log.debug("Starting browser pool initialization...")
+        """Initialize the browser and page pool on startup."""
+        logger.info("Starting browser initialization")
         try:
-            self.browser_pool = BrowserPool(
-                max_browsers=10,
-                debug=self.debug,
-                log=self.log
-            )
-            await self.browser_pool.initialize()
-            self.log.success("Browser pool initialized successfully")
+            await self._initialize_browser()
         except Exception as e:
-            self.log.failure(f"Failed to initialize browser pool: {str(e)}")
+            logger.error(f"Failed to initialize browser: {str(e)}")
             raise
 
-    @debug
-    async def _solve_turnstile(self, url: str, sitekey: str, invisible: bool = False, headless: bool = False, cookies: dict = None) -> TurnstileAPIResult:
-        """Solve the Turnstile challenge using browser pool."""
+    async def _initialize_browser(self) -> None:
+        """Initialize the browser and create the page pool."""
+
+        if self.browser_type == "chromium" or self.browser_type == "chrome":
+            playwright = await async_playwright().start()
+        elif self.browser_type == "camoufox":
+            camoufox = AsyncCamoufox(headless=self.headless)
+
+        for _ in range(self.thread_count):
+            if self.browser_type == "chromium":
+                browser = await playwright.chromium.launch(
+                    headless=self.headless,
+                    args=self.browser_args
+                )
+                page = await browser.new_page()
+
+            elif self.browser_type == "chrome":
+                browser = await playwright.chromium.launch_persistent_context(
+                    user_data_dir=f"{os.getcwd()}/tmp/turnstile-chrome-{''.join(random.choices(string.ascii_letters + string.digits, k=10))}",
+                    channel="chrome",
+                    headless=self.headless,
+                    no_viewport=True,
+                )
+                page = browser.pages[0]
+
+            elif self.browser_type == "camoufox":
+                browser = await camoufox.start()
+                page = await browser.new_page()
+
+            await self.browser_pool.put((_+1, browser, page))
+
+            if self.debug:
+                logger.success(f"Browser {_ + 1} initialized successfully")
+
+        logger.success(f"Browser pool initialized with {self.browser_pool.qsize()} browsers")
+
+
+    async def _solve_turnstile(self, task_id: str, url: str, sitekey: str, action: str = None, cdata: str = None):
+        """Solve the Turnstile challenge."""
+
+        index, browser, page = await self.browser_pool.get()
         start_time = time.time()
-        loader = Loader(desc="Solving captcha...", timeout=0.05)
-        loader.start()
-        page = None
 
         try:
-            browser = await self.browser_pool.get_browser()
-            try:
-                if browser not in self.page_pools:
-                    self.page_pools[browser] = PagePool(await browser.new_context(), debug=self.debug, log=self.log)
-                    await self.page_pools[browser].initialize()
-                
-                page_pool = self.page_pools[browser]
-                page = await page_pool.get_page()
-                
-                # Rest of the solving logic...
-                self.log.debug(f"Starting Turnstile solve for URL: {url}")
-                self.log.debug("Setting up page data and route")
+            if self.debug:
+                logger.debug(f"Browser {index}: Starting Turnstile solve for URL: {url} with Sitekey: {sitekey}")
+                logger.debug(f"Browser {index}: Setting up page data and route")
 
-                if cookies:
-                    domain = url.split("//")[-1].split("/")[0]
-                    cookie_list = []
-                    for name, value in cookies.items():
-                        cookie_list.append({
-                            "name": name,
-                            "value": str(value),
-                            "domain": domain,
-                            "path": "/"
-                        })
-                    if cookie_list:
-                        await page.context.add_cookies(cookie_list)
+            url_with_slash = url + "/" if not url.endswith("/") else url
+            turnstile_div = f'<div class="cf-turnstile" data-sitekey="{sitekey}"' + (f' data-action="{action}"' if action else '') + (f' data-cdata="{cdata}"' if cdata else '') + '></div>'
+            page_data = self.HTML_TEMPLATE.replace("<!-- cf turnstile -->", turnstile_div)
 
-                url_with_slash = url + "/" if not url.endswith("/") else url
-                turnstile_div = f'<div class="cf-turnstile" data-sitekey="{sitekey}" data-theme="light"></div>'
-                page_data = self.HTML_TEMPLATE.replace("<!-- cf turnstile -->", turnstile_div)
+            await page.route(url_with_slash, lambda route: route.fulfill(body=page_data, status=200))
+            await page.goto(url_with_slash)
 
-                await page.route(url_with_slash, lambda route: route.fulfill(body=page_data, status=200))
-                await page.goto(url_with_slash)
+            if self.debug:
+                logger.debug(f"Browser {index}: Setting up Turnstile widget dimensions")
 
-                self.log.debug("Starting Turnstile response retrieval loop")
-
-                max_attempts = 10
-                attempts = 0
-                while attempts < max_attempts:
-                    turnstile_check = await page.eval_on_selector(
-                        "[name=cf-turnstile-response]", 
-                        "el => el.value"
-                    )
-                    if turnstile_check == "":
-                        self.log.debug(f"Attempt {attempts + 1}: No Turnstile response yet")
-                        
-                        await page.evaluate("document.querySelector('.cf-turnstile').style.width = '70px'")
-                        await page.click(".cf-turnstile")
-                        await asyncio.sleep(0.5)
-                        attempts += 1
-                    else:
-                        turnstile_element = await page.query_selector("[name=cf-turnstile-response]")
-                        if turnstile_element:
-                            value = await turnstile_element.get_attribute("value")
-                            elapsed_time = round(time.time() - start_time, 3)
-                            
-                            self.log.debug(f"Turnstile response received: {value[:45]}...")
-                            
-                            self.log.message(
-                                "Cloudflare",
-                                f"Successfully solved captcha: {value[:45]}...",
-                                start=start_time,
-                                end=time.time()
-                            )
-                            
-                            return TurnstileAPIResult(
-                                result=value,
-                                elapsed_time_seconds=elapsed_time
-                            )
-                        break
-
-                self.log.failure("Failed to retrieve Turnstile value")
-                return TurnstileAPIResult(
-                    result=None,
-                    status="failure",
-                    error="Max attempts reached without solution"
-                )
-
-            except Exception as e:
-                self.log.failure(f"Error solving Turnstile: {str(e)}")
-                return TurnstileAPIResult(
-                    result=None,
-                    status="error",
-                    error=str(e)
-                )
-            finally:
-                if page:
-                    await page_pool.return_page(page)
-                await self.browser_pool.return_browser(browser)
-                loader.stop()
-        except Exception as e:
-            loader.stop()
-            self.log.failure(f"Critical error: {str(e)}")
-            return TurnstileAPIResult(
-                result=None,
-                status="error",
-                error=str(e)
+            await page.eval_on_selector(
+                "//div[@class='cf-turnstile']",
+                "el => el.style.width = '70px'"
             )
+
+            if self.debug:
+                logger.debug(f"Browser {index}: Starting Turnstile response retrieval loop")
+
+            for _ in range(10):
+                try:
+                    turnstile_check = await page.input_value("[name=cf-turnstile-response]")
+                    if turnstile_check == "":
+                        if self.debug:
+                            logger.debug(f"Browser {index}: Attempt {_} - No Turnstile response yet")
+
+                        await page.click("//div[@class='cf-turnstile']", timeout=3000)
+                        await asyncio.sleep(0.5)
+                    else:
+                        element = await page.query_selector("[name=cf-turnstile-response]")
+                        if element:
+                            value = await element.get_attribute("value")
+                            elapsed_time = round(time.time() - start_time, 3)
+
+                            logger.success(f"Browser {index}: Successfully solved captcha - {COLORS.get('MAGENTA')}{value[:10]}{COLORS.get('RESET')} in {COLORS.get('GREEN')}{elapsed_time}{COLORS.get('RESET')} Seconds")
+
+                            self.results[task_id] = {"value": value, "elapsed_time": elapsed_time}
+                            self._save_results()
+                        break
+                except:
+                    pass
+
+            if self.results.get(task_id) == "CAPCHA_NOT_READY":
+                elapsed_time = round(time.time() - start_time, 3)
+                self.results[task_id] = {"value": "CAPTCHA_FAIL", "elapsed_time": elapsed_time}
+                if self.debug:
+                    logger.error(f"Browser {index}: Error solving Turnstile in {COLORS.get('RED')}{elapsed_time}{COLORS.get('RESET')} Seconds")
+        except Exception as e:
+            elapsed_time = round(time.time() - start_time, 3)
+            self.results[task_id] = {"value": "CAPTCHA_FAIL", "elapsed_time": elapsed_time}
+            if self.debug:
+                logger.error(f"Browser {index}: Error solving Turnstile: {str(e)}")
+        finally:
+            if self.debug:
+                logger.debug(f"Browser {index}: Clearing page state")
+            await page.goto("about:blank")
+            await self.browser_pool.put((index, browser, page))
 
     async def process_turnstile(self):
         """Handle the /turnstile endpoint requests."""
+        url = request.args.get('url')
+        sitekey = request.args.get('sitekey')
+        action = request.args.get('action')
+        cdata = request.args.get('cdata')
+
+        if not url or not sitekey:
+            return jsonify({
+                "status": "error",
+                "error": "Both 'url' and 'sitekey' are required"
+            }), 400
+
+        task_id = str(uuid.uuid4())
+        self.results[task_id] = "CAPTCHA_NOT_READY"
+
         try:
-            url = request.args.get('url')
-            sitekey = request.args.get('sitekey')
-            invisible = request.args.get('invisible', 'false').lower() == 'true'
-            
-            if not url or not sitekey:
-                return jsonify({
-                    'status': 'error',
-                    'error': 'Missing required parameters: url and sitekey'
-                }), 400
+            asyncio.create_task(self._solve_turnstile(task_id=task_id, url=url, sitekey=sitekey, action=action, cdata=cdata))
 
-            result = await self._solve_turnstile(
-                url=url,
-                sitekey=sitekey,
-                invisible=invisible,
-                headless=True
-            )
-            
-            return jsonify({
-                'status': result.status,
-                'result': result.result,
-                'elapsed_time_seconds': result.elapsed_time_seconds,
-                'error': result.error
-            })
-
+            if self.debug:
+                logger.debug(f"Request completed with taskid {task_id}.")
+            return jsonify({"task_id": task_id}), 202
         except Exception as e:
-            self.log.failure(f"Error processing turnstile request: {str(e)}")
+            logger.error(f"Unexpected error processing request: {str(e)}")
             return jsonify({
-                'status': 'error',
-                'error': str(e)
+                "status": "error",
+                "error": str(e)
             }), 500
 
-    async def index(self):
+    async def get_result(self):
+        """Return solved data"""
+        task_id = request.args.get('id')
+
+        if not task_id or task_id not in self.results:
+            return jsonify({"status": "error", "error": "Invalid task ID/Request parameter"}), 400
+
+        result = self.results[task_id]
+        status_code = 200
+
+        if "CAPTCHA_FAIL" in result:
+            status_code = 422
+
+        return result, status_code
+
+    @staticmethod
+    async def index():
         """Serve the API documentation page."""
         return """
-        <!DOCTYPE html>
-        <html lang="en">
-        <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>Turnstile Solver API</title>
-            <script src="https://cdn.tailwindcss.com"></script>
-        </head>
-        <body class="bg-gray-100 min-h-screen flex items-center justify-center">
-            <div class="bg-white p-8 rounded-lg shadow-md max-w-2xl w-full">
-                <h1 class="text-3xl font-bold mb-6 text-center text-blue-600">Welcome to Turnstile Solver API</h1>
+            <!DOCTYPE html>
+            <html lang="en">
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>Turnstile Solver API</title>
+                <script src="https://cdn.tailwindcss.com"></script>
+            </head>
+            <body class="bg-gray-900 text-gray-200 min-h-screen flex items-center justify-center">
+                <div class="bg-gray-800 p-8 rounded-lg shadow-md max-w-2xl w-full border border-red-500">
+                    <h1 class="text-3xl font-bold mb-6 text-center text-red-500">Welcome to Turnstile Solver API</h1>
 
-                <p class="mb-4 text-gray-700">To use the turnstile service, send a GET request to 
-                   <code class="bg-gray-200 px-2 py-1 rounded">/turnstile</code> with the following query parameters:</p>
+                    <p class="mb-4 text-gray-300">To use the turnstile service, send a GET request to 
+                       <code class="bg-red-700 text-white px-2 py-1 rounded">/turnstile</code> with the following query parameters:</p>
 
-                <ul class="list-disc pl-6 mb-6 text-gray-700">
-                    <li><strong>url</strong>: The URL where Turnstile is to be validated</li>
-                    <li><strong>sitekey</strong>: The site key for Turnstile</li>
-                    <li><strong>invisible</strong>: Optional. Set to true if the Turnstile is invisible.</li>
-                </ul>
+                    <ul class="list-disc pl-6 mb-6 text-gray-300">
+                        <li><strong>url</strong>: The URL where Turnstile is to be validated</li>
+                        <li><strong>sitekey</strong>: The site key for Turnstile</li>
+                    </ul>
 
-                <div class="bg-gray-200 p-4 rounded-lg mb-6">
-                    <p class="font-semibold mb-2">Example usage:</p>
-                    <code class="text-sm break-all">/turnstile?url=https://example.com&sitekey=sitekey&invisible=true</code>
+                    <div class="bg-gray-700 p-4 rounded-lg mb-6 border border-red-500">
+                        <p class="font-semibold mb-2 text-red-400">Example usage:</p>
+                        <code class="text-sm break-all text-red-300">/turnstile?url=https://example.com&sitekey=sitekey</code>
+                    </div>
+
+                    <div class="bg-red-900 border-l-4 border-red-600 p-4 mb-6">
+                        <p class="text-red-200 font-semibold">This project is inspired by 
+                           <a href="https://github.com/Body-Alhoha/turnaround" class="text-red-300 hover:underline">Turnaround</a> 
+                           and is currently maintained by 
+                           <a href="https://github.com/Theyka" class="text-red-300 hover:underline">Theyka</a> 
+                           and <a href="https://github.com/sexfrance" class="text-red-300 hover:underline">Sexfrance</a>.</p>
+                    </div>
                 </div>
-
-                <div class="bg-blue-100 border-l-4 border-blue-500 p-4 mb-6">
-                    <p class="text-blue-700">This project is inspired by 
-                       <a href="https://github.com/Body-Alhoha/turnaround" class="text-blue-600 hover:underline">Turnaround</a> 
-                       and is currently maintained by 
-                       <a href="https://github.com/Theyka" class="text-blue-600 hover:underline">Theyka</a> 
-                       and <a href="https://github.com/sexfrance" class="text-blue-600 hover:underline">Sexfrance</a>.</p>
-                </div>
-            </div>
-        </body>
-        </html>
+            </body>
+            </html>
         """
 
-    def create_app(self):
-        """Create and configure the application instance."""
-        return self.app
 
-if __name__ == "__main__":
-    server = TurnstileAPIServer(debug=True)
-    app = server.create_app()
-    app.run()
+def parse_args():
+    """Parse command-line arguments."""
+    parser = argparse.ArgumentParser(description="Turnstile API Server")
 
-# Credits for the changes: github.com/sexfrance
-# Credit for the original script: github.com/Theyka
+    parser.add_argument('--headless', type=bool, default=False, help='Run the browser in headless mode, without opening a graphical interface. This option requires the --useragent argument to be set (default: False)')
+    parser.add_argument('--useragent', type=str, default=None, help='Specify a custom User-Agent string for the browser. If not provided, the default User-Agent is used')
+    parser.add_argument('--debug', type=bool, default=False, help='Enable or disable debug mode for additional logging and troubleshooting information (default: False)')
+    parser.add_argument('--browser_type', type=str, default='chromium', help='Specify the browser type for the solver. Supported options: chromium, chrome, camoufox (default: chromium)')
+    parser.add_argument('--thread', type=int, default=1, help='Set the number of browser threads to use for multi-threaded mode. Increasing this will speed up execution but requires more resources (default: 1)')
+    parser.add_argument('--host', type=str, default='127.0.0.1', help='Specify the IP address where the API solver runs. (Default: 127.0.0.1)')
+    parser.add_argument('--port', type=str, default='5000', help='Set the port for the API solver to listen on. (Default: 5000)')
+    return parser.parse_args()
+
+
+def create_app(headless: bool, useragent: str, debug: bool, browser_type: str, thread: int) -> Quart:
+    server = TurnstileAPIServer(headless=headless, useragent=useragent, debug=debug, browser_type=browser_type, thread=thread)
+    return server.app
+
+
+if __name__ == '__main__':
+    args = parse_args()
+    browser_types = [
+        'chromium',
+        'chrome',
+        'camoufox',
+    ]
+    if args.browser_type not in browser_types:
+        logger.error(f"Unknown browser type: {COLORS.get('RED')}{args.browser_type}{COLORS.get('RESET')} Available browser types: {browser_types}")
+    elif args.headless is True and args.useragent is None and "camoufox" not in args.browser_type:
+        logger.error(f"You must specify a {COLORS.get('YELLOW')}User-Agent{COLORS.get('RESET')} for Turnstile Solver or use {COLORS.get('GREEN')}camoufox{COLORS.get('RESET')} without useragent")
+    else:
+        app = create_app(headless=args.headless, useragent=args.useragent, debug=args.debug, browser_type=args.browser_type, thread=args.thread)
+        app.run(host=args.host, port=int(args.port))
